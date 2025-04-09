@@ -8,14 +8,8 @@
     ],
     "routes": [
         {
-            "src": "/webhook",
-            "dest": "cf_bot.py",
-            "methods": ["POST"]
-        },
-        {
-            "src": "/",
-            "dest": "cf_bot.py",
-            "methods": ["GET"]
+            "src": "/(.*)",
+            "dest": "cf_bot.py"
         }
     ]
 } 

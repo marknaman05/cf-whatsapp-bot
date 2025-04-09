@@ -1,54 +1,18 @@
-from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
+from http.server import BaseHTTPRequestHandler
 import requests
-from datetime import datetime, timedelta
-import os
-from dotenv import load_dotenv
+from datetime import datetime
 from pytz import timezone
-import logging
 import json
+from urllib.parse import parse_qs
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Load environment variables
-load_dotenv()
-
-# Initialize Flask app
-app = Flask(__name__)
-
-# Set timezone
 IST = timezone('Asia/Kolkata')
-
-def format_contest_info(contest, show_all=False):
-    try:
-        start_time = datetime.fromtimestamp(contest['startTimeSeconds'], tz=IST)
-        time_until = start_time - datetime.now(IST)
-        hours = time_until.total_seconds() / 3600
-        
-        if not show_all and hours > 24:
-            return None
-            
-        contest_info = (
-            f"🏆 {contest['name']}\n"
-            f"⏰ Start Time: {start_time.strftime('%d %b %Y, %I:%M %p IST')}\n"
-            f"⏳ Duration: {contest['durationSeconds']//3600} hours\n"
-            f"🔗 Register at: https://codeforces.com/contestRegistration/{contest['id']}\n"
-        )
-        return contest_info
-    except Exception as e:
-        logger.error(f"Error in format_contest_info: {str(e)}")
-        return None
 
 def get_contests(show_all=False):
     try:
-        logger.info("Fetching contests from Codeforces API")
         response = requests.get('https://codeforces.com/api/contest.list', timeout=5)
         data = response.json()
         
         if data['status'] != 'OK':
-            logger.error(f"Codeforces API error: {data}")
             return "Error fetching contests"
             
         contests = []
@@ -59,51 +23,57 @@ def get_contests(show_all=False):
                 hours = time_until.total_seconds() / 3600
                 
                 if show_all or hours <= 24:
-                    contest_info = format_contest_info(contest, show_all)
-                    if contest_info:
-                        contests.append(contest_info)
+                    contest_info = (
+                        f"🏆 {contest['name']}\n"
+                        f"⏰ Start Time: {start_time.strftime('%d %b %Y, %I:%M %p IST')}\n"
+                        f"⏳ Duration: {contest['durationSeconds']//3600} hours\n"
+                        f"🔗 Register at: https://codeforces.com/contestRegistration/{contest['id']}\n"
+                    )
+                    contests.append(contest_info)
         
         if not contests:
-            logger.info("No upcoming contests found")
             return "No upcoming contests found."
-        
+            
         return "\n\n".join(contests)
-    except requests.exceptions.Timeout:
-        logger.error("Timeout while fetching contests")
-        return "Error: Timeout while fetching contests"
     except Exception as e:
-        logger.error(f"Error in get_contests: {str(e)}")
         return f"Error: {str(e)}"
 
-@app.route("/webhook", methods=['POST'])
-def webhook():
-    try:
-        logger.info("Received webhook request")
-        incoming_msg = request.values.get('Body', '').lower()
-        logger.info(f"Received message: {incoming_msg}")
-        
-        resp = MessagingResponse()
-        msg = resp.message()
-        
-        if incoming_msg == 'next':
-            contests_info = get_contests(show_all=False)
-            msg.body(contests_info)
-        elif incoming_msg == 'list':
-            contests_info = get_contests(show_all=True)
-            msg.body(contests_info)
-        else:
-            msg.body("Hi! I'm your Codeforces contest reminder bot.\n\nCommands:\n- 'next': Shows contests in next 24 hours\n- 'list': Shows all contests in next 7 days")
-        
-        logger.info("Sending response")
-        return str(resp)
-    except Exception as e:
-        logger.error(f"Error in webhook: {str(e)}")
-        return str(e), 500
+class handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path == '/webhook':
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = parse_qs(post_data.decode('utf-8'))
+            
+            incoming_msg = data.get('Body', [''])[0].lower()
+            
+            if incoming_msg == 'next':
+                response = get_contests(show_all=False)
+            elif incoming_msg == 'list':
+                response = get_contests(show_all=True)
+            else:
+                response = "Hi! I'm your Codeforces contest reminder bot.\n\nCommands:\n- 'next': Shows contests in next 24 hours\n- 'list': Shows all contests in next 7 days"
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'text/xml')
+            self.end_headers()
+            
+            twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{response}</Message></Response>'
+            self.wfile.write(twiml.encode())
+            return
+            
+        self.send_response(404)
+        self.end_headers()
+        return
 
-@app.route("/", methods=['GET'])
-def home():
-    return "Codeforces WhatsApp Bot is running!"
-
-# This is required for Vercel
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b"Codeforces WhatsApp Bot is running!")
+            return
+            
+        self.send_response(404)
+        self.end_headers()
+        return
