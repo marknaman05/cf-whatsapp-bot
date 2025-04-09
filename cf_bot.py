@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 from pytz import timezone
 import logging
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -43,25 +44,30 @@ def format_contest_info(contest, show_all=False):
 def get_contests(show_all=False):
     try:
         logger.info("Fetching contests from Codeforces API")
-        response = requests.get('https://codeforces.com/api/contest.list', timeout=10)
-        contests = response.json()
+        response = requests.get('https://codeforces.com/api/contest.list', timeout=5)
+        data = response.json()
         
-        if contests['status'] != 'OK':
-            logger.error(f"Codeforces API error: {contests}")
-            return "Error fetching contests from Codeforces"
+        if data['status'] != 'OK':
+            logger.error(f"Codeforces API error: {data}")
+            return "Error fetching contests"
             
-        upcoming_contests = []
-        for contest in contests['result']:
+        contests = []
+        for contest in data['result']:
             if contest['phase'] == 'BEFORE':
-                contest_info = format_contest_info(contest, show_all)
-                if contest_info:
-                    upcoming_contests.append(contest_info)
+                start_time = datetime.fromtimestamp(contest['startTimeSeconds'], tz=IST)
+                time_until = start_time - datetime.now(IST)
+                hours = time_until.total_seconds() / 3600
+                
+                if show_all or hours <= 24:
+                    contest_info = format_contest_info(contest, show_all)
+                    if contest_info:
+                        contests.append(contest_info)
         
-        if not upcoming_contests:
+        if not contests:
             logger.info("No upcoming contests found")
             return "No upcoming contests found."
         
-        return "\n\n".join(upcoming_contests)
+        return "\n\n".join(contests)
     except requests.exceptions.Timeout:
         logger.error("Timeout while fetching contests")
         return "Error: Timeout while fetching contests"
