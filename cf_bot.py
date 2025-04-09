@@ -1,10 +1,11 @@
-from http.server import BaseHTTPRequestHandler
+from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
 import requests
 from datetime import datetime
 from pytz import timezone
-import json
-from urllib.parse import parse_qs
+import os
 
+app = Flask(__name__)
 IST = timezone('Asia/Kolkata')
 
 def get_contests(show_all=False):
@@ -38,42 +39,30 @@ def get_contests(show_all=False):
     except Exception as e:
         return f"Error: {str(e)}"
 
-class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        if self.path == '/webhook':
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = parse_qs(post_data.decode('utf-8'))
-            
-            incoming_msg = data.get('Body', [''])[0].lower()
-            
-            if incoming_msg == 'next':
-                response = get_contests(show_all=False)
-            elif incoming_msg == 'list':
-                response = get_contests(show_all=True)
-            else:
-                response = "Hi! I'm your Codeforces contest reminder bot.\n\nCommands:\n- 'next': Shows contests in next 24 hours\n- 'list': Shows all contests in next 7 days"
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'text/xml')
-            self.end_headers()
-            
-            twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{response}</Message></Response>'
-            self.wfile.write(twiml.encode())
-            return
-            
-        self.send_response(404)
-        self.end_headers()
-        return
+@app.route("/webhook", methods=['POST'])
+def webhook():
+    try:
+        incoming_msg = request.values.get('Body', '').lower()
+        resp = MessagingResponse()
+        msg = resp.message()
+        
+        if incoming_msg == 'next':
+            contests_info = get_contests(show_all=False)
+            msg.body(contests_info)
+        elif incoming_msg == 'list':
+            contests_info = get_contests(show_all=True)
+            msg.body(contests_info)
+        else:
+            msg.body("Hi! I'm your Codeforces contest reminder bot.\n\nCommands:\n- 'next': Shows contests in next 24 hours\n- 'list': Shows all contests in next 7 days")
+        
+        return str(resp)
+    except Exception as e:
+        return str(e), 500
 
-    def do_GET(self):
-        if self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
-            self.end_headers()
-            self.wfile.write(b"Codeforces WhatsApp Bot is running!")
-            return
-            
-        self.send_response(404)
-        self.end_headers()
-        return
+@app.route("/", methods=['GET'])
+def home():
+    return "Codeforces WhatsApp Bot is running!"
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
